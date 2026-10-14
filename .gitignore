@@ -1,0 +1,7 @@
+# real settings (contain passwords / Wi-Fi keys)
+config.env
+# images and working files
+*.img
+*.img.xz
+*.img.sha256
+work/
