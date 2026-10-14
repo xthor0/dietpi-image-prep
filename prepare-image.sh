@@ -6,6 +6,7 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 config="$here/config.env"
 image=""
+host_name=""
 out=""
 force=0
 
@@ -15,7 +16,8 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<USAGE
-Usage: $0 -i DietPi_<board>.img.xz [-c config.env] [-o output.img] [-f]
+Usage: $0 -n HOSTNAME -i DietPi_<board>.img.xz [-c config.env] [-o output.img] [-f]
+  -n  hostname for this board (required; changes per card, so it is not in config.env)
   -i  stock DietPi image (.img.xz or .img)
   -c  settings file (default: $here/config.env; copy config.env.example)
   -o  output image (default: ./<input name>-prepared.img)
@@ -24,8 +26,9 @@ USAGE
   exit 1
 }
 
-while getopts "i:c:o:fh" opt; do
+while getopts "n:i:c:o:fh" opt; do
   case $opt in
+    n) host_name=$OPTARG ;;
     i) image=$OPTARG ;;
     c) config=$OPTARG ;;
     o) out=$OPTARG ;;
@@ -33,7 +36,9 @@ while getopts "i:c:o:fh" opt; do
     *) usage ;;
   esac
 done
+[ -n "$host_name" ] || { echo "ERROR: -n HOSTNAME is required" >&2; usage; }
 [ -n "$image" ] || usage
+[[ "$host_name" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || die "invalid hostname '$host_name' (letters, digits and hyphens; no dots, no leading/trailing hyphen)"
 [ "$(uname -s)" = Linux ] || die "Linux only (needs loop devices and ext4 write support)"
 [ -r "$image" ]  || die "cannot read image: $image"
 [ -r "$config" ] || die "cannot read config: $config (copy config.env.example to config.env)"
@@ -47,7 +52,6 @@ done
 
 # shellcheck disable=SC1090
 . "$config"
-HOST_NAME=${HOST_NAME:-dietpi}
 TIMEZONE=${TIMEZONE:-UTC}
 KEYBOARD_LAYOUT=${KEYBOARD_LAYOUT:-us}
 PASSWORD=${PASSWORD:-p@ssw0rd}
@@ -88,7 +92,7 @@ fi
 
 if [ -z "$out" ]; then
   base=$(basename "$image"); base=${base%.xz}; base=${base%.img}
-  out="$PWD/${base}-prepared.img"
+  out="$PWD/${base}-${host_name}.img"
 fi
 if [ -e "$out" ] && [ "$force" != 1 ]; then die "$out exists (use -f to overwrite)"; fi
 
@@ -147,7 +151,7 @@ set_kv "$txt" AUTO_SETUP_AUTOMATED 1
 set_kv "$txt" AUTO_SETUP_GLOBAL_PASSWORD "$PASSWORD"
 set_kv "$txt" AUTO_SETUP_KEYBOARD_LAYOUT "$KEYBOARD_LAYOUT"
 set_kv "$txt" AUTO_SETUP_TIMEZONE "$TIMEZONE"
-set_kv "$txt" AUTO_SETUP_NET_HOSTNAME "$HOST_NAME"
+set_kv "$txt" AUTO_SETUP_NET_HOSTNAME "$host_name"
 set_kv "$txt" AUTO_SETUP_SSH_SERVER_INDEX "$SSH_SERVER_INDEX"
 set_kv "$txt" AUTO_UNMASK_LOGIND "$UNMASK_LOGIND"
 [ -z "$APT_INSTALLS" ] || set_kv "$txt" AUTO_SETUP_APT_INSTALLS "$APT_INSTALLS"

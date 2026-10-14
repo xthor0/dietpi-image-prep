@@ -11,11 +11,11 @@ Turn a stock [DietPi](https://dietpi.com/) image into a ready-to-flash image tha
 ```sh
 cp config.env.example config.env
 $EDITOR config.env                # at least USERNAME and SSH_KEY_URLS
-./prepare-image.sh -i DietPi_OrangePiZero3-ARMv8-Trixie.img.xz
-./flash.sh -i DietPi_OrangePiZero3-ARMv8-Trixie-prepared.img
+./prepare-image.sh -n myboard -i DietPi_OrangePiZero3-ARMv8-Trixie.img.xz
+./flash.sh -i DietPi_OrangePiZero3-ARMv8-Trixie-myboard.img
 ```
 
-Put the card in the board, power it on, and wait a few minutes. DietPi resizes the filesystem, installs OpenSSH, runs apt, and reboots by itself. Then `ssh <USERNAME>@<HOST_NAME or its IP>`.
+Put the card in the board, power it on, and wait a few minutes. DietPi resizes the filesystem, installs OpenSSH, runs apt, and reboots by itself. Then `ssh <USERNAME>@<hostname or its IP>`.
 
 Set `IMAGE_SHA256` in `config.env` to the checksum published on the DietPi download page, otherwise the download is not verified.
 
@@ -24,7 +24,8 @@ Set `IMAGE_SHA256` in `config.env` to the checksum published on the DietPi downl
 | Setting (`config.env`) | Effect |
 |---|---|
 | always | `AUTO_SETUP_AUTOMATED=1`, so first boot needs no input |
-| `HOST_NAME`, `TIMEZONE`, `KEYBOARD_LAYOUT`, `PASSWORD` | the matching `AUTO_SETUP_*` values in `dietpi.txt` (`PASSWORD` is DietPi's global password for root and the `dietpi` user) |
+| `-n HOSTNAME` (command line, required) | `AUTO_SETUP_NET_HOSTNAME`; it changes per card, so it is an argument and not in `config.env` |
+| `TIMEZONE`, `KEYBOARD_LAYOUT`, `PASSWORD` | the matching `AUTO_SETUP_*` values in `dietpi.txt` (`PASSWORD` is DietPi's global password for root and the `dietpi` user) |
 | `SSH_SERVER_INDEX=-2` | OpenSSH instead of DietPi's default Dropbear (needed for `sshd_config.d`, `sshd -T`, and most Ansible roles) |
 | `UNMASK_LOGIND=1` | `AUTO_UNMASK_LOGIND=1`, since DietPi masks logind and ships no dbus, which breaks `hostnamectl`/`timedatectl` and Ansible's `hostname` and `timezone` modules |
 | `APT_INSTALLS="python3 sudo"` | `AUTO_SETUP_APT_INSTALLS`; DietPi has no python3 and Ansible needs it |
