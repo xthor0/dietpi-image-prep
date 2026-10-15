@@ -7,6 +7,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 config="$here/config.env"
 image=""
 host_name=""
+static_ip=""
 out=""
 force=0
 
@@ -16,8 +17,10 @@ die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<USAGE
-Usage: $0 -n HOSTNAME -i DietPi_<board>.img.xz [-c config.env] [-o output.img] [-f]
+Usage: $0 -n HOSTNAME -i DietPi_<board>.img.xz [-a IP[/CIDR]] [-c config.env] [-o output.img] [-f]
   -n  hostname for this board (required; changes per card, so it is not in config.env)
+  -a  static IPv4 address for this board, e.g. 192.168.1.20/24 (default /24; omit for DHCP).
+      Needs STATIC_GATEWAY in config.env; STATIC_DNS is optional (defaults to the gateway)
   -i  stock DietPi image (.img.xz or .img)
   -c  settings file (default: $here/config.env; copy config.env.example)
   -o  output image (default: ./<input name>-prepared.img)
@@ -26,9 +29,10 @@ USAGE
   exit 1
 }
 
-while getopts "n:i:c:o:fh" opt; do
+while getopts "n:a:i:c:o:fh" opt; do
   case $opt in
     n) host_name=$OPTARG ;;
+    a) static_ip=$OPTARG ;;
     i) image=$OPTARG ;;
     c) config=$OPTARG ;;
     o) out=$OPTARG ;;
@@ -58,7 +62,7 @@ PASSWORD=${PASSWORD:-p@ssw0rd}
 USERNAME=${USERNAME:-}
 SSH_KEY_URLS=${SSH_KEY_URLS:-}
 SUDO_NOPASSWD=${SUDO_NOPASSWD:-1}
-APT_INSTALLS=${APT_INSTALLS:-python3 sudo}
+APT_INSTALLS=${APT_INSTALLS:-python3 python3-apt sudo}
 UNMASK_LOGIND=${UNMASK_LOGIND:-1}
 SSH_SERVER_INDEX=${SSH_SERVER_INDEX:--2}
 WIFI_ENABLED=${WIFI_ENABLED:-0}
@@ -67,6 +71,33 @@ WIFI_KEY=${WIFI_KEY:-}
 WIFI_KEYMGR=${WIFI_KEYMGR:-WPA-PSK}
 WIFI_COUNTRY=${WIFI_COUNTRY:-US}
 IMAGE_SHA256=${IMAGE_SHA256:-}
+STATIC_GATEWAY=${STATIC_GATEWAY:-}
+STATIC_DNS=${STATIC_DNS:-}
+
+# dotted quad -> integer; valid_ipv4 rejects anything that is not four octets of 0-255
+valid_ipv4() {
+  local o IFS=.
+  [[ $1 =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+  for o in $1; do [ "$((10#$o))" -le 255 ] || return 1; done
+}
+ip_to_int() { local IFS=. o; read -ra o <<< "$1"; echo $(( (10#${o[0]} << 24) + (10#${o[1]} << 16) + (10#${o[2]} << 8) + 10#${o[3]} )); }
+
+if [ -n "$static_ip" ]; then
+  ip=${static_ip%/*}
+  cidr=24
+  [[ $static_ip == */* ]] && cidr=${static_ip#*/}
+  valid_ipv4 "$ip" || die "-a: '$ip' is not a valid IPv4 address"
+  [[ $cidr =~ ^[0-9]+$ ]] && [ "$cidr" -ge 8 ] && [ "$cidr" -le 30 ] || die "-a: prefix length '$cidr' must be 8-30"
+  [ -n "$STATIC_GATEWAY" ] || die "-a needs STATIC_GATEWAY in $config"
+  valid_ipv4 "$STATIC_GATEWAY" || die "STATIC_GATEWAY '$STATIC_GATEWAY' is not a valid IPv4 address"
+  [ "$ip" != "$STATIC_GATEWAY" ] || die "-a: the address is the same as the gateway"
+  mask=$(( (0xFFFFFFFF << (32 - cidr)) & 0xFFFFFFFF ))
+  addr=$(ip_to_int "$ip"); net=$(( addr & mask )); bcast=$(( net | (~mask & 0xFFFFFFFF) ))
+  [ "$addr" -ne "$net" ] && [ "$addr" -ne "$bcast" ] || die "-a: $ip is the network or broadcast address of /$cidr"
+  [ $(( $(ip_to_int "$STATIC_GATEWAY") & mask )) -eq "$net" ] || die "STATIC_GATEWAY $STATIC_GATEWAY is not inside $ip/$cidr"
+  dns=$(tr ',' ' ' <<< "${STATIC_DNS:-$STATIC_GATEWAY}" | xargs)
+  for d in $dns; do valid_ipv4 "$d" || die "STATIC_DNS entry '$d' is not a valid IPv4 address"; done
+fi
 
 if [ -n "$USERNAME" ] && [ -z "$SSH_KEY_URLS" ]; then
   die "USERNAME is set but SSH_KEY_URLS is empty; set at least one URL or clear USERNAME"
@@ -154,6 +185,12 @@ set_kv "$txt" AUTO_SETUP_TIMEZONE "$TIMEZONE"
 set_kv "$txt" AUTO_SETUP_NET_HOSTNAME "$host_name"
 set_kv "$txt" AUTO_SETUP_SSH_SERVER_INDEX "$SSH_SERVER_INDEX"
 set_kv "$txt" AUTO_UNMASK_LOGIND "$UNMASK_LOGIND"
+if [ -n "$static_ip" ]; then
+  set_kv "$txt" AUTO_SETUP_NET_USESTATIC 1
+  set_kv "$txt" AUTO_SETUP_NET_STATIC_IP "$ip/$cidr"
+  set_kv "$txt" AUTO_SETUP_NET_STATIC_GATEWAY "$STATIC_GATEWAY"
+  set_kv "$txt" AUTO_SETUP_NET_STATIC_DNS "$dns"
+fi
 [ -z "$APT_INSTALLS" ] || set_kv "$txt" AUTO_SETUP_APT_INSTALLS "$APT_INSTALLS"
 
 if [ "$WIFI_ENABLED" = 1 ]; then
