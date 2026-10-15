@@ -24,11 +24,12 @@ Set `IMAGE_SHA256` in `config.env` to the checksum published on the DietPi downl
 | Setting (`config.env`) | Effect |
 |---|---|
 | always | `AUTO_SETUP_AUTOMATED=1`, so first boot needs no input |
+| `-a IP[/CIDR]` (command line, optional) | static IPv4 (`AUTO_SETUP_NET_USESTATIC` and friends). Needs `STATIC_GATEWAY` in `config.env`; `STATIC_DNS` is optional and defaults to the gateway. The address, prefix (8-30), gateway-in-subnet and network/broadcast address are checked before anything is written. Omit for DHCP |
 | `-n HOSTNAME` (command line, required) | `AUTO_SETUP_NET_HOSTNAME`; it changes per card, so it is an argument and not in `config.env` |
 | `TIMEZONE`, `KEYBOARD_LAYOUT`, `PASSWORD` | the matching `AUTO_SETUP_*` values in `dietpi.txt` (`PASSWORD` is DietPi's global password for root and the `dietpi` user) |
 | `SSH_SERVER_INDEX=-2` | OpenSSH instead of DietPi's default Dropbear (needed for `sshd_config.d`, `sshd -T`, and most Ansible roles) |
 | `UNMASK_LOGIND=1` | `AUTO_UNMASK_LOGIND=1`, since DietPi masks logind and ships no dbus, which breaks `hostnamectl`/`timedatectl` and Ansible's `hostname` and `timezone` modules |
-| `APT_INSTALLS="python3 sudo"` | `AUTO_SETUP_APT_INSTALLS`; DietPi has no python3 and Ansible needs it |
+| `APT_INSTALLS="python3 python3-apt sudo"` | `AUTO_SETUP_APT_INSTALLS`; DietPi has no python3 and Ansible needs it (`python3-apt` for its `apt` module, including check mode) |
 | `USERNAME`, `SSH_KEY_URLS`, `SUDO_NOPASSWD` | installs `/boot/Automation_Custom_Script.sh`, which creates the user, optionally gives passwordless sudo, and installs keys from the first URL that returns only valid public keys |
 | `WIFI_*` | enables Wi-Fi in `dietpi.txt` and fills entry 0 of `dietpi-wifi.txt` |
 
@@ -55,10 +56,12 @@ Tested on a Debian 13 x86_64 host against `DietPi_OrangePiZero3-ARMv8-Trixie.img
 - `prepare-image.sh` runs, every `dietpi.txt` and `dietpi-wifi.txt` setting is written, and a Wi-Fi SSID and key containing quotes, `$`, `&`, `|` and a trailing backslash round-trip exactly.
 - `flash.sh` writes and verifies, and refuses the system disk, undersized targets, a wrong confirmation, and `-y` without `-d` (tested against loop devices, not a real card).
 - An earlier hand-made card with the same settings booted unattended, created the user, installed OpenSSH, and installed validated keys.
+- A card built by `prepare-image.sh` booted unattended on an Orange Pi Zero 3: the first-boot script ran and installed validated keys, `python3` was present before any Ansible run (`APT_INSTALLS`), and `dbus` was installed with logind no longer masked (`UNMASK_LOGIND`).
+- `-a` rejects a bad octet, a non-numeric or out-of-range prefix, a missing gateway, a gateway outside the subnet, an address equal to the gateway, and the network or broadcast address. A valid `-a` writes the four static settings, and omitting `-a` leaves `AUTO_SETUP_NET_USESTATIC=0`.
 
 Not tested:
 
-- A boot of an image produced by these scripts. Specifically `AUTO_UNMASK_LOGIND=1` installing dbus and `libpam-systemd`, and `AUTO_SETUP_APT_INSTALLS` (appended to the end of `dietpi.txt`) being honored.
+- That DietPi actually applies the static settings on first boot (`-a`); only the written `dietpi.txt` lines were checked.
 - Wi-Fi on first boot.
 - Boards whose boot files live on a separate FAT partition (the script looks for `dietpi.txt` in `/boot` of each partition and at the partition root).
 
