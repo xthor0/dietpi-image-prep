@@ -20,7 +20,8 @@ usage() {
 Usage: $0 -n HOSTNAME -i DietPi_<board>.img.xz [-a IP[/CIDR]] [-c config.env] [-o output.img] [-f]
   -n  hostname for this board (required; changes per card, so it is not in config.env)
   -a  static IPv4 address for this board, e.g. 192.168.1.20/24 (default /24; omit for DHCP).
-      Needs STATIC_GATEWAY in config.env; STATIC_DNS is optional (defaults to the gateway)
+      The gateway defaults to the first host address of the subnet (x.x.x.1) and DNS defaults to
+      the gateway; set STATIC_GATEWAY / STATIC_DNS in config.env to override
   -i  stock DietPi image (.img.xz or .img)
   -c  settings file (default: $here/config.env; copy config.env.example)
   -o  output image (default: ./<input name>-prepared.img)
@@ -80,6 +81,7 @@ valid_ipv4() {
   [[ $1 =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
   for o in $1; do [ "$((10#$o))" -le 255 ] || return 1; done
 }
+int_to_ip() { echo "$(( ($1 >> 24) & 255 )).$(( ($1 >> 16) & 255 )).$(( ($1 >> 8) & 255 )).$(( $1 & 255 ))"; }
 ip_to_int() { local IFS=. o; read -ra o <<< "$1"; echo $(( (10#${o[0]} << 24) + (10#${o[1]} << 16) + (10#${o[2]} << 8) + 10#${o[3]} )); }
 
 if [ -n "$static_ip" ]; then
@@ -88,12 +90,16 @@ if [ -n "$static_ip" ]; then
   [[ $static_ip == */* ]] && cidr=${static_ip#*/}
   valid_ipv4 "$ip" || die "-a: '$ip' is not a valid IPv4 address"
   [[ $cidr =~ ^[0-9]+$ ]] && [ "$cidr" -ge 8 ] && [ "$cidr" -le 30 ] || die "-a: prefix length '$cidr' must be 8-30"
-  [ -n "$STATIC_GATEWAY" ] || die "-a needs STATIC_GATEWAY in $config"
-  valid_ipv4 "$STATIC_GATEWAY" || die "STATIC_GATEWAY '$STATIC_GATEWAY' is not a valid IPv4 address"
-  [ "$ip" != "$STATIC_GATEWAY" ] || die "-a: the address is the same as the gateway"
   mask=$(( (0xFFFFFFFF << (32 - cidr)) & 0xFFFFFFFF ))
   addr=$(ip_to_int "$ip"); net=$(( addr & mask )); bcast=$(( net | (~mask & 0xFFFFFFFF) ))
   [ "$addr" -ne "$net" ] && [ "$addr" -ne "$bcast" ] || die "-a: $ip is the network or broadcast address of /$cidr"
+  # no gateway configured: use the first host address of the subnet (x.x.x.1)
+  if [ -z "$STATIC_GATEWAY" ]; then
+    STATIC_GATEWAY=$(int_to_ip $(( net + 1 )))
+    [ "$STATIC_GATEWAY" != "$ip" ] || die "-a: $ip is the default gateway ($STATIC_GATEWAY) of that subnet; set STATIC_GATEWAY in $config"
+  fi
+  valid_ipv4 "$STATIC_GATEWAY" || die "STATIC_GATEWAY '$STATIC_GATEWAY' is not a valid IPv4 address"
+  [ "$ip" != "$STATIC_GATEWAY" ] || die "-a: the address is the same as the gateway"
   [ $(( $(ip_to_int "$STATIC_GATEWAY") & mask )) -eq "$net" ] || die "STATIC_GATEWAY $STATIC_GATEWAY is not inside $ip/$cidr"
   dns=$(tr ',' ' ' <<< "${STATIC_DNS:-$STATIC_GATEWAY}" | xargs)
   for d in $dns; do valid_ipv4 "$d" || die "STATIC_DNS entry '$d' is not a valid IPv4 address"; done
