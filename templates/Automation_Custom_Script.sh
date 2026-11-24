@@ -31,13 +31,16 @@ install -d -o "$USERNAME" -g "$USERNAME" -m 0700 "$home/.ssh"
 t="$home/.ssh/authorized_keys.new"
 
 # Accept a download only if it is non-empty, bare public keys, all parsed by ssh-keygen.
-fetch() {
-  rm -f "$t"
-  curl -fsSL --max-time 15 --retry 2 --retry-delay 3 "$1" -o "$t" || return 1
+valid_keys() {
   n=$(grep -cvE '^[[:space:]]*$' "$t")
   [ "$n" -ge 1 ] || return 1
   if grep -vE '^[[:space:]]*$' "$t" | grep -qvE '^(ssh-|ecdsa-|sk-)'; then return 1; fi
   [ "$(ssh-keygen -l -f "$t" 2>/dev/null | wc -l)" -eq "$n" ]
+}
+fetch() {
+  rm -f "$t"
+  curl -fsSL --max-time 15 --retry 2 --retry-delay 3 "$1" -o "$t" || return 1
+  valid_keys
 }
 
 ok=0
@@ -45,6 +48,17 @@ for url in ${SSH_KEY_URLS:-}; do
   if fetch "$url"; then ok=1; log "keys from $url"; break; fi
   log "no valid keys from $url"
 done
+
+# Every URL failed: fall back to the keys baked into the image, if any.
+if [ "$ok" != 1 ] && [ -n "${SSH_FALLBACK_KEYS:-}" ]; then
+  printf '%s\n' "$SSH_FALLBACK_KEYS" > "$t"
+  if valid_keys; then
+    ok=1; log "URLs failed; using the fallback keys from the image"
+    touch /root/KEYS_FALLBACK_USED
+  else
+    log "SSH_FALLBACK_KEYS is not a set of valid public keys"
+  fi
+fi
 
 if [ "$ok" = 1 ]; then
   mv "$t" "$home/.ssh/authorized_keys"

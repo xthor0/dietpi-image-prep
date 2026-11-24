@@ -33,7 +33,7 @@ Set `IMAGE_SHA256` in `config.env` to the checksum published on the DietPi downl
 | `USERNAME`, `SSH_KEY_URLS`, `SUDO_NOPASSWD` | installs `/boot/Automation_Custom_Script.sh`, which creates the user, optionally gives passwordless sudo, and installs keys from the first URL that returns only valid public keys |
 | `WIFI_*` | enables Wi-Fi in `dietpi.txt` and fills entry 0 of `dietpi-wifi.txt` |
 
-The key fetch accepts a download only if it is non-empty, every line is a bare public key (`ssh-`, `ecdsa-`, `sk-`; no `command=` options), and `ssh-keygen` parses every line. If every URL fails, the script exits non-zero and leaves `/root/KEYS_FETCH_FAILED`. Password login stays on, so the board is still recoverable.
+The key fetch accepts a download only if it is non-empty, every line is a bare public key (`ssh-`, `ecdsa-`, `sk-`; no `command=` options), and `ssh-keygen` parses every line. If every URL fails, the script installs `SSH_FALLBACK_KEYS` (public keys baked into the image) and leaves `/root/KEYS_FALLBACK_USED`; with no valid fallback it exits non-zero and leaves `/root/KEYS_FETCH_FAILED`. Password login stays on, so the board is still recoverable.
 
 ## Wi-Fi
 
