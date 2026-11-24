@@ -65,6 +65,7 @@ SSH_KEY_URLS=${SSH_KEY_URLS:-}
 SSH_FALLBACK_KEYS=${SSH_FALLBACK_KEYS:-}
 SUDO_NOPASSWD=${SUDO_NOPASSWD:-1}
 APT_INSTALLS=${APT_INSTALLS:-python3 python3-apt sudo}
+MDNS=${MDNS:-1}
 UNMASK_LOGIND=${UNMASK_LOGIND:-1}
 SSH_SERVER_INDEX=${SSH_SERVER_INDEX:--2}
 WIFI_ENABLED=${WIFI_ENABLED:-0}
@@ -197,6 +198,9 @@ if [ -n "$static_ip" ]; then
   set_kv "$txt" AUTO_SETUP_NET_STATIC_IP "$ip/$cidr"
   set_kv "$txt" AUTO_SETUP_NET_STATIC_GATEWAY "$STATIC_GATEWAY"
   set_kv "$txt" AUTO_SETUP_NET_STATIC_DNS "$dns"
+fi
+if [ "$MDNS" = 1 ]; then
+  case " $APT_INSTALLS " in *" avahi-daemon "*) ;; *) APT_INSTALLS="${APT_INSTALLS:+$APT_INSTALLS }avahi-daemon" ;; esac
 fi
 [ -z "$APT_INSTALLS" ] || set_kv "$txt" AUTO_SETUP_APT_INSTALLS "$APT_INSTALLS"
 

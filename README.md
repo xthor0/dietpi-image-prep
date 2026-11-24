@@ -30,6 +30,7 @@ Set `IMAGE_SHA256` in `config.env` to the checksum published on the DietPi downl
 | `SSH_SERVER_INDEX=-2` | OpenSSH instead of DietPi's default Dropbear (needed for `sshd_config.d`, `sshd -T`, and most Ansible roles) |
 | `UNMASK_LOGIND=1` | `AUTO_UNMASK_LOGIND=1`, since DietPi masks logind and ships no dbus, which breaks `hostnamectl`/`timedatectl` and Ansible's `hostname` and `timezone` modules |
 | `APT_INSTALLS="python3 python3-apt sudo"` | `AUTO_SETUP_APT_INSTALLS`; DietPi has no python3 and Ansible needs it (`python3-apt` for its `apt` module, including check mode) |
+| `MDNS=1` | adds `avahi-daemon` to `AUTO_SETUP_APT_INSTALLS`, so the board answers at `<hostname>.local` like Raspberry Pi OS. macOS works as is; Linux clients need `nss-mdns` or `systemd-resolved` with mDNS on. It does not cross subnets/VLANs. Not yet verified on a boot |
 | `USERNAME`, `SSH_KEY_URLS`, `SUDO_NOPASSWD` | installs `/boot/Automation_Custom_Script.sh`, which creates the user, optionally gives passwordless sudo, and installs keys from the first URL that returns only valid public keys |
 | `WIFI_*` | enables Wi-Fi in `dietpi.txt` and fills entry 0 of `dietpi-wifi.txt` |
 
