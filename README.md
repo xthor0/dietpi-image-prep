@@ -4,7 +4,21 @@ Turn a stock [DietPi](https://dietpi.com/) image into a ready-to-flash image tha
 
 - `prepare-image.sh` unpacks the image, edits `dietpi.txt` (and `dietpi-wifi.txt`), and installs a first-boot script.
 - `flash.sh` writes the result to an SD card or USB disk and verifies it.
-- Both are Linux only: they loop-mount the image's ext4 root partition, which macOS cannot do. Run them on any Linux box (a VM works).
+- Both loop-mount the image's ext4 root partition, so they need Linux. `prepare-image.sh` also runs on macOS through Podman (below); `flash.sh` is Linux only, so on macOS flash the result with balenaEtcher or Raspberry Pi Imager.
+
+## macOS
+
+`prepare-image.sh` detects macOS and re-runs itself inside a Debian container on the Podman machine, where the Linux kernel does the loop mount. You run the same command as on Linux.
+
+```sh
+brew install podman
+podman machine init --rootful --now
+```
+
+- The machine must be **rootful** (`podman machine set --rootful` on an existing one, then stop and start it). A rootless machine cannot loop-mount, and the script says so and exits.
+- The first run builds a small image from `Containerfile`; later runs reuse it.
+- The image is unpacked and edited inside the VM, then copied to the output path, so the output directory (and the input image and config directories) must be somewhere Podman shares with the VM. That is your home directory by default.
+- Needs about the size of the unpacked image in free VM disk space, plus the output copy on the Mac.
 
 ## Quick start
 
@@ -30,7 +44,7 @@ Set `IMAGE_SHA256` in `config.env` to the checksum published on the DietPi downl
 | `SSH_SERVER_INDEX=-2` | OpenSSH instead of DietPi's default Dropbear (needed for `sshd_config.d`, `sshd -T`, and most Ansible roles) |
 | `UNMASK_LOGIND=1` | `AUTO_UNMASK_LOGIND=1`, since DietPi masks logind and ships no dbus, which breaks `hostnamectl`/`timedatectl` and Ansible's `hostname` and `timezone` modules |
 | `APT_INSTALLS="python3 python3-apt sudo"` | `AUTO_SETUP_APT_INSTALLS`; DietPi has no python3 and Ansible needs it (`python3-apt` for its `apt` module, including check mode) |
-| `MDNS=1` | adds `avahi-daemon` to `AUTO_SETUP_APT_INSTALLS`, so the board answers at `<hostname>.local` like Raspberry Pi OS. macOS works as is; Linux clients need `nss-mdns` or `systemd-resolved` with mDNS on. It does not cross subnets/VLANs. Not yet verified on a boot |
+| `MDNS=1` | adds `avahi-daemon` to `AUTO_SETUP_APT_INSTALLS`, so the board answers at `<hostname>.local` like Raspberry Pi OS. macOS works as is; Linux clients need `nss-mdns` or `systemd-resolved` with mDNS on. It does not cross subnets/VLANs |
 | `USERNAME`, `SSH_KEY_URLS`, `SUDO_NOPASSWD` | installs `/boot/Automation_Custom_Script.sh`, which creates the user, optionally gives passwordless sudo, and installs keys from the first URL that returns only valid public keys |
 | `WIFI_*` | enables Wi-Fi in `dietpi.txt` and fills entry 0 of `dietpi-wifi.txt` |
 
@@ -60,10 +74,18 @@ Tested on a Debian 13 x86_64 host against `DietPi_OrangePiZero3-ARMv8-Trixie.img
 - A card built by `prepare-image.sh` booted unattended on an Orange Pi Zero 3: the first-boot script ran and installed validated keys, `python3` was present before any Ansible run (`APT_INSTALLS`), and `dbus` was installed with logind no longer masked (`UNMASK_LOGIND`).
 - `-a` rejects a bad octet, a non-numeric or out-of-range prefix, a gateway outside the subnet, an address equal to the gateway, and the network or broadcast address. A valid `-a` writes the four static settings, and omitting `-a` leaves `AUTO_SETUP_NET_USESTATIC=0`.
 
+Also tested on an Orange Pi Zero 3, booting cards built by `prepare-image.sh`:
+
+- `-a` static IP is applied on first boot.
+- The baked-in `SSH_FALLBACK_KEYS` let you SSH in before the key fetch had succeeded.
+- Wi-Fi works on first boot.
+- `MDNS=1`: the board answers at `<hostname>.local`.
+- On macOS (Apple Silicon, rootful Podman machine), `prepare-image.sh` built a working image from a real DietPi image. Earlier, against a small synthetic image, an existing output without `-f` was refused, a bad `-a` and a non-DietPi image failed with a nonzero exit and no output file, and no loop devices were left behind.
+
 Not tested:
 
-- That DietPi actually applies the static settings on first boot (`-a`); only the written `dietpi.txt` lines were checked.
-- Wi-Fi on first boot.
+- The macOS error paths on a real setup (rootless Podman machine, an output path outside the shared directories).
+- `MDNS=0`, and `<hostname>.local` from a Linux client.
 - Boards whose boot files live on a separate FAT partition (the script looks for `dietpi.txt` in `/boot` of each partition and at the partition root).
 
 ## Gotcha: DietPi masks the apt timers

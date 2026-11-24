@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Take a stock DietPi image, bake in first-boot settings, and write a ready-to-flash .img.
-# Linux only (loop-mounts the image's ext4 root partition). Re-runs itself under sudo.
+# Loop-mounts the image's ext4 root partition, so it needs Linux: on Linux it re-runs itself under
+# sudo, and on macOS it re-runs itself in a container on the (rootful) Podman machine.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -44,9 +45,63 @@ done
 [ -n "$host_name" ] || { echo "ERROR: -n HOSTNAME is required" >&2; usage; }
 [ -n "$image" ] || usage
 [[ "$host_name" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || die "invalid hostname '$host_name' (letters, digits and hyphens; no dots, no leading/trailing hyphen)"
-[ "$(uname -s)" = Linux ] || die "Linux only (needs loop devices and ext4 write support)"
 [ -r "$image" ]  || die "cannot read image: $image"
 [ -r "$config" ] || die "cannot read config: $config (copy config.env.example to config.env)"
+
+if [ -z "$out" ]; then
+  base=$(basename "$image"); base=${base%.xz}; base=${base%.img}
+  out="$PWD/${base}-${host_name}.img"
+fi
+if [ -e "$out" ] && [ "$force" != 1 ]; then die "$out exists (use -f to overwrite)"; fi
+
+# macOS has no loop devices or ext4, so run this same script inside a Linux container on the Podman
+# machine. Only the arguments are rebuilt here; validation, config parsing and the image edit all run
+# in the container. Written for macOS's bash 3.2.
+run_in_container() {
+  command -v podman >/dev/null || die "podman not found (brew install podman, then: podman machine init --rootful --now)"
+  local rootless
+  rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null) \
+    || die "cannot reach podman; start the VM with: podman machine start"
+  [ "$rootless" = false ] \
+    || die "podman is rootless and cannot loop-mount; run: podman machine stop && podman machine set --rootful && podman machine start"
+
+  local outdir imgdir cfgdir
+  outdir=$(dirname "$out"); [ -d "$outdir" ] || die "output directory does not exist: $outdir"
+  outdir=$(cd "$outdir" && pwd)
+  imgdir=$(cd "$(dirname "$image")" && pwd)
+  cfgdir=$(cd "$(dirname "$config")" && pwd)
+
+  local tag
+  tag="dietpi-image-prep:$(shasum -a 256 "$here/Containerfile" | cut -c1-12)"
+  if ! podman image exists "$tag"; then
+    log "building container image $tag"
+    podman build -q -t "$tag" -f "$here/Containerfile" "$here" >/dev/null || die "podman build failed"
+  fi
+
+  local args=(-n "$host_name" -i "/in/image/$(basename "$image")" -c "/in/config/$(basename "$config")")
+  [ -z "$static_ip" ] || args+=(-a "$static_ip")
+
+  log "preparing in a container (the image is unpacked and edited inside the Podman VM, then copied out)"
+  # /dev from the VM, not a snapshot: the loop partition nodes appear after the container starts.
+  # Work in the container's own filesystem, and copy the result out through a .partial file.
+  podman run --rm --privileged -v /dev:/dev -e PREPARE_IN_CONTAINER=1 \
+    -v "$here:/repo:ro" -v "$imgdir:/in/image:ro" -v "$cfgdir:/in/config:ro" -v "$outdir:/out" \
+    "$tag" bash -c '
+      set -euo pipefail
+      dest=$1; shift
+      mkdir -p /work
+      /repo/prepare-image.sh "$@" -o /work/prepared.img -f
+      cp /work/prepared.img "$dest.partial" && mv -f "$dest.partial" "$dest"
+    ' _ "/out/$(basename "$out")" "${args[@]}"
+  log "done: $outdir/$(basename "$out")"
+  log "next: flash it with balenaEtcher or Raspberry Pi Imager"
+}
+
+if [ "$(uname -s)" = Darwin ]; then
+  run_in_container
+  exit 0
+fi
+[ "$(uname -s)" = Linux ] || die "unsupported OS (needs loop devices and ext4 write support)"
 
 if [ "$EUID" -ne 0 ]; then
   exec sudo "$0" "$@"
@@ -128,12 +183,6 @@ if [ -n "$IMAGE_SHA256" ]; then
 else
   warn "IMAGE_SHA256 not set; the download is not verified"
 fi
-
-if [ -z "$out" ]; then
-  base=$(basename "$image"); base=${base%.xz}; base=${base%.img}
-  out="$PWD/${base}-${host_name}.img"
-fi
-if [ -e "$out" ] && [ "$force" != 1 ]; then die "$out exists (use -f to overwrite)"; fi
 
 loop=""
 mnt=""
@@ -235,5 +284,7 @@ umount "$mnt"
 losetup -d "$loop"; loop=""
 rmdir "$mnt"; mnt=""
 trap - EXIT
-log "done: $out"
-log "next: ./flash.sh -i $out"
+if [ -z "${PREPARE_IN_CONTAINER:-}" ]; then
+  log "done: $out"
+  log "next: ./flash.sh -i $out"
+fi
